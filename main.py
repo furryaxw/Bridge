@@ -1,38 +1,36 @@
-import time
-
 import json
 import os
-import requests
 import threading
+import time
+
+import requests
 import websocket
 
-Backend_API = ''
-Backend = "OpenAI"  # OpenAI ollama TTS_test
-model = ""  # For ollama
+from config import Config
 
-Live2D_API = 'ws://127.0.0.1:10086/api'
-enable_Live2D = False
-enable_gui = False
-prompt_index = [
-    ""
-]
-system_prompt = prompt_index[0]
+default = {
+    "Backend_API": 'http://127.0.0.1:11434/api/chat',
+    "Backend": "ollama",  # OpenAI ollama TTS_test
+    "model": "",  # For ollama
 
-log_path = 'log/'
-log_file = 'chat.log'
-audio_file = 'tmp.mp3'
-voice_list = [
-    'zh-CN-XiaoxiaoNeural',  # 0 Female
-    'zh-CN-XiaoyiNeural',  # 1 Female recomanded
-    'zh-CN-YunjianNeural',  # 2 Male
-    'zh-CN-YunxiNeural',  # 3 Male recomanded
-    'zh-CN-YunxiaNeural',  # 4 Male
-    'zh-CN-YunyangNeural'  # 5 Male
-]
-speaker = "zh-CN-XiaoyiNeural"
-GPT_soVITS_API = ""
-tts_engine = "Edge_tts"  # GPT_soVITS Edge_tts
-enable_tts = False
+    "Live2D_API": 'ws://127.0.0.1:10086/api',
+    "enable_Live2D": False,
+    "enable_gui": False,
+    "system_prompt": "",
+
+    "voice_list": [
+        'zh-CN-XiaoxiaoNeural',  # 0 Female
+        'zh-CN-XiaoyiNeural',  # 1 Female recomanded
+        'zh-CN-YunjianNeural',  # 2 Male
+        'zh-CN-YunxiNeural',  # 3 Male recomanded
+        'zh-CN-YunxiaNeural',  # 4 Male
+        'zh-CN-YunyangNeural'  # 5 Male
+    ],
+    "speaker": "",
+    "GPT_soVITS_API": "http://127.0.0.1:9880",
+    "tts_engine": "Edge_tts",  # GPT_soVITS Edge_tts
+    "enable_tts": False,
+}
 
 
 def post_msg():
@@ -141,6 +139,7 @@ def chat_main(input):
     log_f.flush()
     print('time cost', (time.time() - time_start), 's')
     output(response, "AI: ")
+    return response
 
 
 def enter_read(event):
@@ -159,23 +158,28 @@ def enter_read(event):
             gui_input.delete(0, tkinter.END)
 
 
-# def on_click(event):
-#     start_x = event.x
-#     start_y = event.y
+def on_click(event):
+    global start_x, start_y
+    start_x = event.x
+    start_y = event.y
 
 
 def on_move(event):
-    x, y = event.widget.winfo_pointerxy()
-    window.geometry("+%s+%s" % (x - 10, y - 10))
-    # window.geometry("+%s+%s" % (x + event.x - start_x, y + event.y - start_y))
+    # x, y = event.widget.winfo_pointerxy()
+    # window.geometry("+%s+%s" % (x - 10, y - 10))
+    delta_x = event.x - start_x
+    delta_y = event.y - start_y
+    new_x = window.winfo_x() + delta_x
+    new_y = window.winfo_y() + delta_y
+    window.geometry(f"+{new_x}+{new_y}")
 
 
 def visibility(event):
     x, y = event.x, event.y
-    if 2 < x < 138 and 2 < y < 18:
-        window.attributes("-alpha", 0.8)
-    else:
-        window.attributes("-alpha", 0.2)
+    # if 2 < x < 138 and 2 < y < 18:
+    #     window.attributes("-alpha", 0.8)
+    # else:
+    #     window.attributes("-alpha", 0.2)
 
 
 def command(input):
@@ -220,10 +224,47 @@ def output(message, front=""):
         thread_tts.start()
 
 
+log_path = 'bridge/'
 if not os.path.exists(log_path):
     os.makedirs(log_path)
     print("Log dir not found, creating")
-log_f = open(log_path + log_file, "a")
+
+conf_f = Config('bridge', default)
+conf = conf_f.read()
+log_file = 'chat.log'
+audio_file = 'tmp.mp3'
+try:
+    Backend_API = conf["Backend_API"]
+    Backend = conf["Backend"]
+    model = conf["model"]
+
+    Live2D_API = conf["Live2D_API"]
+    enable_Live2D = conf["enable_Live2D"]
+    enable_gui = conf["enable_gui"]
+    system_prompt = conf["system_prompt"]
+
+    speaker = conf["speaker"]
+    GPT_soVITS_API = conf["GPT_soVITS_API"]
+    tts_engine = conf["tts_engine"]
+    enable_tts = conf["enable_tts"]
+except KeyError:
+    conf_f.update()
+    conf = conf_f.read()
+    Backend_API = conf["Backend_API"]
+    Backend = conf["Backend"]
+    model = conf["model"]
+
+    Live2D_API = conf["Live2D_API"]
+    enable_Live2D = conf["enable_Live2D"]
+    enable_gui = conf["enable_gui"]
+    system_prompt = conf["system_prompt"]
+
+    speaker = conf["speaker"]
+    GPT_soVITS_API = conf["GPT_soVITS_API"]
+    tts_engine = conf["tts_engine"]
+    enable_tts = conf["enable_tts"]
+
+log_f = open(log_path + log_file, "a", encoding='utf-8')
 log = [
     {"role": "system", "content": system_prompt}
 ]
@@ -247,7 +288,7 @@ if enable_gui:
     gui_move.pack(side=tkinter.LEFT)
     gui_input.pack(side=tkinter.RIGHT)
     window.bind('<Motion>', visibility)
-    gui_move.bind('<Button-1>', on_move)
+    gui_move.bind('<Button-1>', on_click)
     gui_move.bind('<B1-Motion>', on_move)
     gui_input.bind("<Return>", enter_read)
     window.mainloop()
