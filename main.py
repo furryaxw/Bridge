@@ -1,5 +1,6 @@
 import json
 import os
+import random
 import threading
 import time
 
@@ -10,13 +11,14 @@ from config import Config
 
 default = {
     "Backend_API": 'http://127.0.0.1:11434/api/chat',
-    "Backend": "ollama",  # OpenAI ollama TTS_test
+    "Backend": "ollama",  # OpenAI ollama OpenAI2 TTS_test
     "model": "",  # For ollama
 
     "Live2D_API": 'ws://127.0.0.1:10086/api',
     "enable_Live2D": False,
     "enable_gui": False,
     "system_prompt": "",
+    "censor": [""],
 
     "voice_list": [
         'zh-CN-XiaoxiaoNeural',  # 0 Female
@@ -30,13 +32,14 @@ default = {
     "GPT_soVITS_API": "http://127.0.0.1:9880",
     "tts_engine": "Edge_tts",  # GPT_soVITS Edge_tts
     "enable_tts": False,
+    "enable_stt": False,
 }
 
 
 def post_msg():
     global thread_response_alive
-    match Backend:
-        case "OpenAI":
+    match Backend.lower():
+        case "openai":
             json_data = json.dumps({
                 "messages": log,
                 "max_tokens": 2000,
@@ -52,6 +55,22 @@ def post_msg():
             response_sector = list(response_msg)[index_msg]
             thread_response_alive = False
             return response_sector["message"]["content"]
+        case "openai2":
+            json_data = json.dumps({
+                "messages": log,
+                "max_tokens": 2000,
+                "temperature": 0.9,
+                "num_beams": 4,
+                "top_k": 40,
+                "top_p": 0.75,
+                "repetition_penalty": 1.25
+            })
+            thread_response_alive = True
+            raw = requests.post(Backend_API, data=json_data, headers={'Content-Type': 'application/json'}).content
+            response_msg = json.loads(raw)["choices"]
+            response_sector = list(response_msg)[0]
+            thread_response_alive = False
+            return response_sector["message"]["content"]
         case "ollama":
             json_data = json.dumps({
                 "messages": log,
@@ -63,7 +82,7 @@ def post_msg():
             response_msg = json.loads(raw)["message"]["content"]
             thread_response_alive = False
             return response_msg
-        case "TTS_test":
+        case "tts_test":
             return "测试"
 
 
@@ -72,16 +91,19 @@ def tts(text):
     import re
     text.replace('(', '（').replace(')', '）')
     text = re.sub(r"（.*?）", '', text)
-    match tts_engine:
-        case "Edge_tts":
+    match tts_engine.lower():
+        case "edge_tts":
             import asyncio
             global thread_tts_alive
             thread_tts_alive = True
+            global audio_file
+            audio_file = str(random.random())[2:] + '.mp3'
             asyncio.run(edge_tts_backend(text))
             playsound(log_path + audio_file)
+            time.sleep(1)
             os.remove(log_path + audio_file)
             thread_tts_alive = False
-        case "GPT_soVITS":
+        case "gpt_sovits":
             import pyaudio
             url = f"{GPT_soVITS_API}?text={text}&text_language=zh"
             p = pyaudio.PyAudio()
@@ -138,6 +160,8 @@ def chat_main(input):
     log_f.write("assistant: " + response + "\n")
     log_f.flush()
     print('time cost', (time.time() - time_start), 's')
+    for c in censor_words:
+        response = response.replace(c, '')
     output(response, "AI: ")
     return response
 
@@ -224,82 +248,122 @@ def output(message, front=""):
         thread_tts.start()
 
 
-log_path = 'bridge/'
-if not os.path.exists(log_path):
-    os.makedirs(log_path)
-    print("Log dir not found, creating")
+if __name__ == '__main__':
+    log_path = 'bridge/'
+    audio_file = ''
+    if not os.path.exists(log_path):
+        os.makedirs(log_path)
+        print("Log dir not found, creating")
 
-conf_f = Config('bridge', default)
-conf = conf_f.read()
-log_file = 'chat.log'
-audio_file = 'tmp.mp3'
-try:
-    Backend_API = conf["Backend_API"]
-    Backend = conf["Backend"]
-    model = conf["model"]
-
-    Live2D_API = conf["Live2D_API"]
-    enable_Live2D = conf["enable_Live2D"]
-    enable_gui = conf["enable_gui"]
-    system_prompt = conf["system_prompt"]
-
-    speaker = conf["speaker"]
-    GPT_soVITS_API = conf["GPT_soVITS_API"]
-    tts_engine = conf["tts_engine"]
-    enable_tts = conf["enable_tts"]
-except KeyError:
-    conf_f.update()
+    conf_f = Config('bridge', default)
     conf = conf_f.read()
-    Backend_API = conf["Backend_API"]
-    Backend = conf["Backend"]
-    model = conf["model"]
+    log_file = 'chat.log'
+    try:
+        Backend_API = conf["Backend_API"]
+        Backend = conf["Backend"]
+        model = conf["model"]
 
-    Live2D_API = conf["Live2D_API"]
-    enable_Live2D = conf["enable_Live2D"]
-    enable_gui = conf["enable_gui"]
-    system_prompt = conf["system_prompt"]
+        Live2D_API = conf["Live2D_API"]
+        enable_Live2D = conf["enable_Live2D"]
+        enable_gui = conf["enable_gui"]
+        system_prompt = conf["system_prompt"]
+        censor_words = conf["censor"]
 
-    speaker = conf["speaker"]
-    GPT_soVITS_API = conf["GPT_soVITS_API"]
-    tts_engine = conf["tts_engine"]
-    enable_tts = conf["enable_tts"]
+        speaker = conf["speaker"]
+        GPT_soVITS_API = conf["GPT_soVITS_API"]
+        tts_engine = conf["tts_engine"]
+        enable_tts = conf["enable_tts"]
+        enable_stt = conf["enable_stt"]
+    except KeyError:
+        conf_f.update()
+        conf = conf_f.read()
+        Backend_API = conf["Backend_API"]
+        Backend = conf["Backend"]
+        model = conf["model"]
 
-log_f = open(log_path + log_file, "a", encoding='utf-8')
-log = [
-    {"role": "system", "content": system_prompt}
-]
-index_msg = 0
-log_f.write("system: " + system_prompt + "\n")
-log_f.flush()
-thread_response_alive = False
-thread_tts_alive = False
-if enable_gui:
-    import tkinter
+        Live2D_API = conf["Live2D_API"]
+        enable_Live2D = conf["enable_Live2D"]
+        enable_gui = conf["enable_gui"]
+        system_prompt = conf["system_prompt"]
+        censor_words = conf["censor"]
 
-    start_x, start_y = 0, 0
-    window = tkinter.Tk()
-    gui_input = tkinter.Entry(window, width=20)
-    gui_move = tkinter.Button(window, text="移动", font=('黑体', 10))
-    window.attributes("-alpha", 1)
-    window.config(background='#2B2D30')
-    gui_move.configure(bg='#1E1F22', fg='#BEBEBE')
-    gui_input.configure(bg='#1E1F22', fg='#F5F5F5')
-    window.overrideredirect(True)
-    gui_move.pack(side=tkinter.LEFT)
-    gui_input.pack(side=tkinter.RIGHT)
-    window.bind('<Motion>', visibility)
-    gui_move.bind('<Button-1>', on_click)
-    gui_move.bind('<B1-Motion>', on_move)
-    gui_input.bind("<Return>", enter_read)
-    window.mainloop()
-else:
-    while 1:
-        usr_input = input("User：")
-        # usr_input = "你好"
-        while thread_tts_alive:
-            time.sleep(1)
-        if usr_input != "":
-            if usr_input[0] == "/":
-                command(usr_input)
-            else:
-                chat_main(usr_input)
+        speaker = conf["speaker"]
+        GPT_soVITS_API = conf["GPT_soVITS_API"]
+        tts_engine = conf["tts_engine"]
+        enable_tts = conf["enable_tts"]
+        enable_stt = conf["enable_stt"]
+
+    log_f = open(log_path + log_file, "a", encoding='utf-8')
+    log = [
+        {"role": "system", "content": system_prompt}
+    ]
+    index_msg = 0
+    log_f.write("system: " + system_prompt + "\n")
+    log_f.flush()
+    thread_response_alive = False
+    thread_tts_alive = False
+    if enable_stt:
+        from RealtimeSTT import AudioToTextRecorder
+        from multiprocessing import freeze_support
+
+        freeze_support()
+        print("Initializing RealtimeSTT test...")
+        recorder_config = {
+            'spinner': False,
+            'model': 'base',
+            'download_root': './bridge/model',
+            'language': 'zh',
+            'silero_sensitivity': 0.4,
+            'webrtc_sensitivity': 2,
+            'post_speech_silence_duration': 0.2,
+            'min_length_of_recording': 0,
+            'min_gap_between_recordings': 0,
+        }
+        recorder = AudioToTextRecorder(**recorder_config)
+        print("Say something...")
+
+
+        def process_text(text):
+            import zhconv
+            msg = zhconv.convert(text, 'zh-hans')
+            print(msg)
+            chat_main(msg)
+
+
+        def realtime_stt_daemon():
+            while True:
+                recorder.text(process_text)
+
+
+        stt = threading.Thread(target=realtime_stt_daemon, daemon=True)
+        stt.start()
+    if enable_gui:
+        import tkinter
+
+        start_x, start_y = 0, 0
+        window = tkinter.Tk()
+        gui_input = tkinter.Entry(window, width=20)
+        gui_move = tkinter.Button(window, text="移动", font=('黑体', 10))
+        window.attributes("-alpha", 1)
+        window.config(background='#2B2D30')
+        gui_move.configure(bg='#1E1F22', fg='#BEBEBE')
+        gui_input.configure(bg='#1E1F22', fg='#F5F5F5')
+        window.overrideredirect(True)
+        gui_move.pack(side=tkinter.LEFT)
+        gui_input.pack(side=tkinter.RIGHT)
+        window.bind('<Motion>', visibility)
+        gui_move.bind('<Button-1>', on_click)
+        gui_move.bind('<B1-Motion>', on_move)
+        gui_input.bind("<Return>", enter_read)
+        window.mainloop()
+    else:
+        while 1:
+            usr_input = input("User：")
+            # usr_input = "你好"
+            while thread_tts_alive:
+                time.sleep(1)
+            if usr_input != "":
+                if usr_input[0] == "/":
+                    command(usr_input)
+                else:
+                    chat_main(usr_input)
