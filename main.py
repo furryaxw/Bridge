@@ -1,3 +1,4 @@
+import csv
 import json
 import os
 import random
@@ -8,6 +9,7 @@ import requests
 import websocket
 
 from config import Config
+from process import *
 
 default = {
     "Backend_API": 'http://127.0.0.1:11434/api/chat',
@@ -153,10 +155,23 @@ def chat_main(input):
     global index_msg
     index_msg += 2
     log.append({"role": "user", "content": input})
+    with open(log_path + log_file + '.csv', 'a+', newline='', encoding='utf-8') as f:
+        writer = csv.writer(f)
+        row = ["user", input]
+        writer.writerow(row)
     log_f.write("user: " + input + "\n")
     log_f.flush()
-    response = post_msg()
+    try:
+        response = post_message(post_msg())
+    except NameError:
+        response = post_msg()
+    except TypeError:
+        response = post_msg()
     log.append({"role": "assistant", "content": response})
+    with open(log_path + log_file + '.csv', 'a+', newline='', encoding='utf-8') as f:
+        writer = csv.writer(f)
+        row = ["assistant", response]
+        writer.writerow(row)
     log_f.write("assistant: " + response + "\n")
     log_f.flush()
     print('time cost', (time.time() - time_start), 's')
@@ -189,8 +204,6 @@ def on_click(event):
 
 
 def on_move(event):
-    # x, y = event.widget.winfo_pointerxy()
-    # window.geometry("+%s+%s" % (x - 10, y - 10))
     delta_x = event.x - start_x
     delta_y = event.y - start_y
     new_x = window.winfo_x() + delta_x
@@ -294,9 +307,23 @@ if __name__ == '__main__':
         enable_stt = conf["enable_stt"]
 
     log_f = open(log_path + log_file, "a", encoding='utf-8')
-    log = [
-        {"role": "system", "content": system_prompt}
-    ]
+    try:
+        with open(log_path + log_file + '.csv', mode='r', newline='', encoding='utf-8') as file:
+            fieldnames = ("role", "content")
+            reader = csv.DictReader(file, fieldnames)
+            log = [row for row in reader][1:]
+        if not log:
+            raise FileNotFoundError
+    except FileNotFoundError:
+        log = [
+            {"role": "system", "content": system_prompt}
+        ]
+        with open(log_path + log_file + '.csv', mode='w', newline='', encoding='utf-8') as file:
+            keys = log[0].keys()
+            writer = csv.DictWriter(file, fieldnames=keys)
+            writer.writeheader()
+            writer.writerows(log)
+
     index_msg = 0
     log_f.write("system: " + system_prompt + "\n")
     log_f.flush()
@@ -310,12 +337,12 @@ if __name__ == '__main__':
         print("Initializing RealtimeSTT test...")
         recorder_config = {
             'spinner': False,
-            'model': 'base',
+            'model': 'base',  # tiny, base, medium, large-v2
             'download_root': './bridge/model',
             'language': 'zh',
             'silero_sensitivity': 0.4,
             'webrtc_sensitivity': 2,
-            'post_speech_silence_duration': 0.2,
+            'post_speech_silence_duration': 0.25,
             'min_length_of_recording': 0,
             'min_gap_between_recordings': 0,
         }
@@ -326,7 +353,7 @@ if __name__ == '__main__':
         def process_text(text):
             import zhconv
             msg = zhconv.convert(text, 'zh-hans')
-            print(msg)
+            print("User: " + msg)
             chat_main(msg)
 
 
@@ -359,7 +386,6 @@ if __name__ == '__main__':
     else:
         while 1:
             usr_input = input("User：")
-            # usr_input = "你好"
             while thread_tts_alive:
                 time.sleep(1)
             if usr_input != "":
