@@ -13,15 +13,20 @@ from process import *
 
 default = {
     "Backend_API": 'http://127.0.0.1:11434/api/chat',
-    "Backend": "ollama",  # OpenAI ollama OpenAI2 TTS_test
-    "model": "",  # For ollama
+    "Backend": "OpenAI",  # OpenAI Ollama
+    "model": "",
+    "system_prompt": "",
+    "model_config": {
+        "max_tokens": 2048,
+        "temperature": 0.8,
+    },
+    "censor": [""],
 
     "Live2D_API": 'ws://127.0.0.1:10086/api',
     "enable_Live2D": False,
     "enable_gui": False,
-    "system_prompt": "",
-    "censor": [""],
 
+    "enable_tts": False,
     "voice_list": [
         'zh-CN-XiaoxiaoNeural',  # 0 Female
         'zh-CN-XiaoyiNeural',  # 1 Female recomanded
@@ -33,59 +38,71 @@ default = {
     "speaker": "",
     "GPT_soVITS_API": "http://127.0.0.1:9880",
     "tts_engine": "Edge_tts",  # GPT_soVITS Edge_tts
-    "enable_tts": False,
+
     "enable_stt": False,
+    "stt_config": {
+        'spinner': False,
+        'model': "base",  # tiny, base, medium, large-v2
+        'download_root': './bridge/model',
+        'language': 'zh',
+        'silero_sensitivity': 0.4,
+        'webrtc_sensitivity': 2,
+        'post_speech_silence_duration': 0.25,
+        'min_length_of_recording': 0,
+        'min_gap_between_recordings': 0,
+    },
+    "debug": False
 }
 
 
 def post_msg():
     global thread_response_alive
-    match Backend.lower():
+    match conf_f.conf["Backend"].lower():
         case "openai":
-            json_data = json.dumps({
-                "messages": log,
-                "max_tokens": 2000,
-                "temperature": 0.9,
-                "num_beams": 4,
-                "top_k": 40,
-                "top_p": 0.75,
-                "repetition_penalty": 1.25
-            })
+            msg = {"messages": log}
+            msg.update(conf_f.conf["model_config"])
+            if conf_f.conf["model"] is not None:
+                msg.update({"model": conf_f.conf["model"]})
+            json_data = json.dumps(msg)
             thread_response_alive = True
-            raw = requests.post(Backend_API, data=json_data, headers={'Content-Type': 'application/json'}).content
-            response_msg = json.loads(raw)["choices"]
-            response_sector = list(response_msg)[index_msg]
-            thread_response_alive = False
-            return response_sector["message"]["content"]
-        case "openai2":
-            json_data = json.dumps({
-                "messages": log,
-                "max_tokens": 2000,
-                "temperature": 0.9,
-                "num_beams": 4,
-                "top_k": 40,
-                "top_p": 0.75,
-                "repetition_penalty": 1.25
-            })
-            thread_response_alive = True
-            raw = requests.post(Backend_API, data=json_data, headers={'Content-Type': 'application/json'}).content
+            raw = requests.post(conf_f.conf["Backend_API"], data=json_data,
+                                headers={'Content-Type': 'application/json'}).content
+            if conf_f.conf["debug"]: print("raw: " + str(raw))
             response_msg = json.loads(raw)["choices"]
             response_sector = list(response_msg)[0]
+            thread_response_alive = False
+            return response_sector["message"]["content"]
+        case "openai_old":
+            msg = {"messages": log}
+            msg.update(conf_f.conf["model_config"])
+            if conf_f.conf["model"] is not None:
+                msg.update({"model": conf_f.conf["model"]})
+            json_data = json.dumps(msg)
+            thread_response_alive = True
+            raw = requests.post(conf_f.conf["Backend_API"], data=json_data,
+                                headers={'Content-Type': 'application/json'}).content
+            if conf_f.conf["debug"]: print("raw: " + str(raw))
+            response_msg = json.loads(raw)["choices"]
+            response_sector = list(response_msg)[index_msg]
             thread_response_alive = False
             return response_sector["message"]["content"]
         case "ollama":
             json_data = json.dumps({
                 "messages": log,
-                "model": model,
+                "model": conf_f.conf["model"],
                 "stream": False
             })
             thread_response_alive = True
-            raw = requests.post(Backend_API, data=json_data, headers={'Content-Type': 'application/json'}).content
+            raw = requests.post(conf_f.conf["Backend_API"], data=json_data,
+                                headers={'Content-Type': 'application/json'}).content
+            if conf_f.conf["debug"]: print("raw: " + str(raw))
             response_msg = json.loads(raw)["message"]["content"]
             thread_response_alive = False
             return response_msg
         case "tts_test":
             return "测试"
+        case _:
+            raise KeyError("Unknown Backend Name")
 
 
 def tts(text):
@@ -93,7 +110,7 @@ def tts(text):
     import re
     text.replace('(', '（').replace(')', '）')
     text = re.sub(r"（.*?）", '', text)
-    match tts_engine.lower():
+    match conf_f.conf["tts_engine"].lower():
         case "edge_tts":
             import asyncio
             global thread_tts_alive
@@ -107,7 +124,8 @@ def tts(text):
             thread_tts_alive = False
         case "gpt_sovits":
             import pyaudio
-            url = f"{GPT_soVITS_API}?text={text}&text_language=zh"
+            sovits_api = conf_f.conf["GPT_soVITS_API"]
+            url = f"{sovits_api}?text={text}&text_language=zh"
             p = pyaudio.PyAudio()
             stream = p.open(format=p.get_format_from_width(2),
                             channels=1,
@@ -125,14 +143,14 @@ async def edge_tts_backend(text):
     import edge_tts
     rate = '+0%'
     volume = '+0%'
-    tts = edge_tts.Communicate(text=text, voice=speaker, rate=rate, volume=volume)
+    tts = edge_tts.Communicate(text=text, voice=conf_f.conf["speaker"], rate=rate, volume=volume)
     await tts.save(log_path + audio_file)
 
 
 def live2d_send(response):
     ws = websocket.WebSocket()
     try:
-        ws.connect(Live2D_API)
+        ws.connect(conf_f.conf["Live2D_API"])
     except Exception as e:
         print('WS异常：', e)
     msg = json.dumps({
@@ -154,28 +172,34 @@ def chat_main(input):
     time_start = time.time()
     global index_msg
     index_msg += 2
+    try:
+        input = post_message(input)
+    except NameError:
+        pass
+    except TypeError:
+        pass
     log.append({"role": "user", "content": input})
-    with open(log_path + log_file + '.csv', 'a+', newline='', encoding='utf-8') as f:
+    with open(log_path + history_file, 'a+', newline='', encoding='utf-8') as f:
         writer = csv.writer(f)
         row = ["user", input]
         writer.writerow(row)
     log_f.write("user: " + input + "\n")
     log_f.flush()
     try:
-        response = post_message(post_msg())
+        response = recv_message(post_msg())
     except NameError:
         response = post_msg()
     except TypeError:
         response = post_msg()
     log.append({"role": "assistant", "content": response})
-    with open(log_path + log_file + '.csv', 'a+', newline='', encoding='utf-8') as f:
+    with open(log_path + history_file, 'a+', newline='', encoding='utf-8') as f:
         writer = csv.writer(f)
         row = ["assistant", response]
         writer.writerow(row)
     log_f.write("assistant: " + response + "\n")
     log_f.flush()
     print('time cost', (time.time() - time_start), 's')
-    for c in censor_words:
+    for c in conf_f.conf["censor"]:
         response = response.replace(c, '')
     output(response, "AI: ")
     return response
@@ -220,26 +244,28 @@ def visibility(event):
 
 
 def command(input):
-    global enable_Live2D, enable_tts, voice
+    global voice
     input = input.lower()
     command_list = input[1:].split(" ")
     if command_list[0] == "set":
         if command_list[1] == "live2d":
             if command_list[2] == "on":
-                enable_Live2D = True
+                conf_f.conf["enable_Live2D"] = True
                 output("Live2D发送已开启")
             elif command_list[2] == "off":
-                enable_Live2D = False
+                conf_f.conf["enable_Live2D"] = False
                 output("Live2D发送已关闭")
             else:
                 output("未知Live2D指令")
 
         elif command_list[1] == "tts":
             if command_list[2] == "on":
-                enable_tts = True
+                conf_f.conf["enable_tts"] = True
+                conf_f.write({"enable_tts": True})
                 output("TTS已开启")
             elif command_list[2] == "off":
-                enable_tts = False
+                conf_f.conf["enable_tts"] = False
+                conf_f.write({"enable_tts": False})
                 output("TTS已关闭")
             elif int(command_list[2]) in range(0, 5):
                 voice = command_list[2]
@@ -254,9 +280,9 @@ def command(input):
 
 def output(message, front=""):
     print(front + message)
-    if enable_Live2D:
+    if conf_f.conf["enable_Live2D"]:
         live2d_send(message)
-    if enable_tts:
+    if conf_f.conf["enable_tts"]:
         thread_tts = threading.Thread(target=tts, args=(message,))
         thread_tts.start()
 
@@ -269,46 +295,12 @@ if __name__ == '__main__':
         print("Log dir not found, creating")
 
     conf_f = Config('bridge', default)
-    conf = conf_f.read()
     log_file = 'chat.log'
-    try:
-        Backend_API = conf["Backend_API"]
-        Backend = conf["Backend"]
-        model = conf["model"]
-
-        Live2D_API = conf["Live2D_API"]
-        enable_Live2D = conf["enable_Live2D"]
-        enable_gui = conf["enable_gui"]
-        system_prompt = conf["system_prompt"]
-        censor_words = conf["censor"]
-
-        speaker = conf["speaker"]
-        GPT_soVITS_API = conf["GPT_soVITS_API"]
-        tts_engine = conf["tts_engine"]
-        enable_tts = conf["enable_tts"]
-        enable_stt = conf["enable_stt"]
-    except KeyError:
-        conf_f.update()
-        conf = conf_f.read()
-        Backend_API = conf["Backend_API"]
-        Backend = conf["Backend"]
-        model = conf["model"]
-
-        Live2D_API = conf["Live2D_API"]
-        enable_Live2D = conf["enable_Live2D"]
-        enable_gui = conf["enable_gui"]
-        system_prompt = conf["system_prompt"]
-        censor_words = conf["censor"]
-
-        speaker = conf["speaker"]
-        GPT_soVITS_API = conf["GPT_soVITS_API"]
-        tts_engine = conf["tts_engine"]
-        enable_tts = conf["enable_tts"]
-        enable_stt = conf["enable_stt"]
+    history_file = 'history.csv'
 
     log_f = open(log_path + log_file, "a", encoding='utf-8')
     try:
-        with open(log_path + log_file + '.csv', mode='r', newline='', encoding='utf-8') as file:
+        with open(log_path + history_file, mode='r', newline='', encoding='utf-8') as file:
             fieldnames = ("role", "content")
             reader = csv.DictReader(file, fieldnames)
             log = [row for row in reader][1:]
@@ -316,37 +308,26 @@ if __name__ == '__main__':
             raise FileNotFoundError
     except FileNotFoundError:
         log = [
-            {"role": "system", "content": system_prompt}
+            {"role": "system", "content": conf_f.conf["system_prompt"]}
         ]
-        with open(log_path + log_file + '.csv', mode='w', newline='', encoding='utf-8') as file:
+        with open(log_path + history_file, mode='w', newline='', encoding='utf-8') as file:
             keys = log[0].keys()
             writer = csv.DictWriter(file, fieldnames=keys)
             writer.writeheader()
             writer.writerows(log)
 
     index_msg = 0
-    log_f.write("system: " + system_prompt + "\n")
+    log_f.write("system: " + conf_f.conf["system_prompt"] + "\n")
     log_f.flush()
     thread_response_alive = False
     thread_tts_alive = False
-    if enable_stt:
+    if conf_f.conf["enable_stt"]:
         from RealtimeSTT import AudioToTextRecorder
         from multiprocessing import freeze_support
 
         freeze_support()
         print("Initializing RealtimeSTT test...")
-        recorder_config = {
-            'spinner': False,
-            'model': 'base',  # tiny, base, medium, large-v2
-            'download_root': './bridge/model',
-            'language': 'zh',
-            'silero_sensitivity': 0.4,
-            'webrtc_sensitivity': 2,
-            'post_speech_silence_duration': 0.25,
-            'min_length_of_recording': 0,
-            'min_gap_between_recordings': 0,
-        }
-        recorder = AudioToTextRecorder(**recorder_config)
+        recorder = AudioToTextRecorder(**conf_f.conf["stt_config"])
         print("Say something...")
 
 
@@ -364,7 +345,7 @@ if __name__ == '__main__':
 
         stt = threading.Thread(target=realtime_stt_daemon, daemon=True)
         stt.start()
-    if enable_gui:
+    if conf_f.conf["enable_gui"]:
         import tkinter
 
         start_x, start_y = 0, 0
@@ -389,7 +370,7 @@ if __name__ == '__main__':
             while thread_tts_alive:
                 time.sleep(1)
             if usr_input != "":
-                if usr_input[0] == "/":
+                if usr_input[0] == "#":
                     command(usr_input)
                 else:
                     chat_main(usr_input)

@@ -2,8 +2,9 @@ import json
 
 
 class Config:
-    file: str = None
-    default: dict = None
+    conf: dict = None
+    __file: str = None
+    __default: dict = None
 
     def __init__(self, file: str, default: dict = None):
         self.default = default
@@ -11,22 +12,19 @@ class Config:
         try:
             with open(self.file, 'r', encoding='utf-8') as f:
                 self.conf = json.load(f)
-        except Exception as e:
+            if default is not None:
+                for key in self.default.keys():
+                    try:
+                        self.conf[key]
+                    except KeyError:
+                        print("配置文件已过时，正在更新")
+                        self.update()
+        except Exception:
             print("配置文件异常，正在重置")
-            print("错误代码：" + str(e))
             self.data = json.dumps(default, indent=4)
+            self.conf = default
             with open(self.file, 'w', encoding='utf-8') as f:
                 f.write("\n" + self.data)
-
-    def read(self):
-        try:
-            with open(self.file, 'r', encoding='utf-8') as f:
-                self.conf = json.load(f)
-            return self.conf
-        except Exception as e:
-            print("读取配置文件异常")
-            print("错误代码：" + str(e))
-            return -1
 
     def write(self, t: dict):
         try:
@@ -37,7 +35,6 @@ class Config:
                 f.flush()
         except Exception as e:
             print("读取配置文件异常")
-            print("错误代码：" + str(e))
             return -1
 
     def wipe(self):
