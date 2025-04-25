@@ -185,9 +185,17 @@ def chat_main(input):
     log_f.flush()
     try:
         from process import recv_message
-        response = recv_message(post_msg())
+        raw = recv_message(post_msg())
+        if type(raw) is dict:
+            llm_output = raw["output"]
+            response = str(raw["raw"])
+        else:
+            llm_output = raw
+            response = raw
     except (ModuleNotFoundError, NameError, TypeError):
-        response = post_msg()
+        raw = post_msg()
+        llm_output = raw
+        response = raw
     log.append({"role": "assistant", "content": response})
     with open(log_path + history_file, 'a+', newline='', encoding='utf-8') as f:
         writer = csv.writer(f)
@@ -197,9 +205,9 @@ def chat_main(input):
     log_f.flush()
     print('time cost', (time.time() - time_start), 's')
     for c in conf_f.conf["censor"]:
-        response = response.replace(c, '')
-    output(response, "AI: ")
-    return response
+        llm_output = llm_output.replace(c, '')
+    output(llm_output, "AI: ")
+    return llm_output
 
 
 def enter_read(event):
