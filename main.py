@@ -9,10 +9,9 @@ import requests
 import websocket
 
 from config import Config
-from process import *
 
 default = {
-    "Backend_API": 'http://127.0.0.1:11434/api/chat',
+    "Backend_API": 'http://127.0.0.1:11234/v1/chat/completions',
     "Backend": "OpenAI",  # OpenAI Ollama
     "model": "",
     "system_prompt": "",
@@ -173,10 +172,9 @@ def chat_main(input):
     global index_msg
     index_msg += 2
     try:
+        from process import post_message
         input = post_message(input)
-    except NameError:
-        pass
-    except TypeError:
+    except (ModuleNotFoundError, NameError, TypeError):
         pass
     log.append({"role": "user", "content": input})
     with open(log_path + history_file, 'a+', newline='', encoding='utf-8') as f:
@@ -186,10 +184,9 @@ def chat_main(input):
     log_f.write("user: " + input + "\n")
     log_f.flush()
     try:
+        from process import recv_message
         response = recv_message(post_msg())
-    except NameError:
-        response = post_msg()
-    except TypeError:
+    except (ModuleNotFoundError, NameError, TypeError):
         response = post_msg()
     log.append({"role": "assistant", "content": response})
     with open(log_path + history_file, 'a+', newline='', encoding='utf-8') as f:
@@ -272,6 +269,14 @@ def command(input):
                 output("TTS音源已设置为：" + voice)
             else:
                 output("未知TTS指令")
+    elif command_list[0] == "del":
+        if command_list[2] == "logs":
+            os.remove(log_path + log_file)
+            for file in [f for f in os.listdir(log_path) if os.path.isfile(os.path.join(log_path, f))]:
+                if file.endswith('.mp3'):
+                    os.remove(os.path.join(log_path, file))
+        elif command_list[2] == "history":
+            os.remove(log_path + history_file)
     elif command_list[0] == "exit":
         quit()
     else:
@@ -298,6 +303,12 @@ if __name__ == '__main__':
     log_file = 'chat.log'
     history_file = 'history.csv'
 
+    if os.path.exists(log_path + conf_f.conf["system_prompt"]):
+        with open(log_path + conf_f.conf["system_prompt"], mode='r', encoding='utf-8') as file:
+            system_prompt = file.read()
+    else:
+        system_prompt = conf_f.conf["system_prompt"]
+
     log_f = open(log_path + log_file, "a", encoding='utf-8')
     try:
         with open(log_path + history_file, mode='r', newline='', encoding='utf-8') as file:
@@ -306,9 +317,11 @@ if __name__ == '__main__':
             log = [row for row in reader][1:]
         if not log:
             raise FileNotFoundError
+        if log[0]["content"] != system_prompt:
+            raise FileNotFoundError
     except FileNotFoundError:
         log = [
-            {"role": "system", "content": conf_f.conf["system_prompt"]}
+            {"role": "system", "content": system_prompt}
         ]
         with open(log_path + history_file, mode='w', newline='', encoding='utf-8') as file:
             keys = log[0].keys()
@@ -317,7 +330,7 @@ if __name__ == '__main__':
             writer.writerows(log)
 
     index_msg = 0
-    log_f.write("system: " + conf_f.conf["system_prompt"] + "\n")
+    log_f.write("system: " + system_prompt + "\n")
     log_f.flush()
     thread_response_alive = False
     thread_tts_alive = False

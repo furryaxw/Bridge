@@ -5,8 +5,8 @@ websocket~=0.2.1
 websocket-client~=1.7.0
 PySimpleGUI
 pyaudio
-enum34~=1.1.10
-numpy~=1.26.4
-pyreadline3~=3.5.4
-realtimestt~=0.3.100
+enum34
+numpy
+pyreadline3
+realtimestt==0.3.100
 zhconv

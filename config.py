@@ -19,8 +19,9 @@ class Config:
                     except KeyError:
                         print("配置文件已过时，正在更新")
                         self.update()
-        except Exception:
+        except Exception as e:
             print("配置文件异常，正在重置")
+            print("错误代码：" + str(e))
             self.data = json.dumps(default, indent=4)
             self.conf = default
             with open(self.file, 'w', encoding='utf-8') as f:
