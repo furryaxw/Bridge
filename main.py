@@ -2,6 +2,7 @@ import csv
 import json
 import os
 import random
+import re
 import threading
 import time
 
@@ -9,6 +10,9 @@ import requests
 import websocket
 
 from config import Config
+
+os.environ["PYGAME_HIDE_SUPPORT_PROMPT"] = "1"
+import pygame
 
 default = {
     "Backend_API": 'http://127.0.0.1:11234/v1/chat/completions',
@@ -50,8 +54,16 @@ default = {
         'min_length_of_recording': 0,
         'min_gap_between_recordings': 0,
     },
+    "proxies": {
+        'http': None,
+        'https': None
+    },
     "debug": False
 }
+thread_tts = threading.Thread
+current_audio_thread = None
+stop_audio_event = threading.Event()
+pygame.mixer.init()
 
 
 def post_msg():
@@ -65,7 +77,8 @@ def post_msg():
             json_data = json.dumps(msg)
             thread_response_alive = True
             raw = requests.post(conf_f.conf["Backend_API"], data=json_data,
-                                headers={'Content-Type': 'application/json'}).content
+                                headers={'Content-Type': 'application/json'},
+                                proxies=conf_f.conf["proxies"]).content
             if conf_f.conf["debug"]: print("raw: " + str(raw))
             response_msg = json.loads(raw)["choices"]
             response_sector = list(response_msg)[0]
@@ -79,7 +92,8 @@ def post_msg():
             json_data = json.dumps(msg)
             thread_response_alive = True
             raw = requests.post(conf_f.conf["Backend_API"], data=json_data,
-                                headers={'Content-Type': 'application/json'}).content
+                                headers={'Content-Type': 'application/json'},
+                                proxies=conf_f.conf["proxies"]).content
             if conf_f.conf["debug"]: print("raw: " + str(raw))
             response_msg = json.loads(raw)["choices"]
             response_sector = list(response_msg)[index_msg]
@@ -92,58 +106,80 @@ def post_msg():
                 "stream": False
             })
             thread_response_alive = True
-            raw = requests.post(conf_f.conf["Backend_API"], data=json_data,
-                                headers={'Content-Type': 'application/json'}).content
+            raw = requests.post(conf_f.conf["Backend_API"] + "/api/chat", data=json_data,
+                                headers={'Content-Type': 'application/json'},
+                                proxies=conf_f.conf["proxies"]).content
             if conf_f.conf["debug"]: print("raw: " + str(raw))
             response_msg = json.loads(raw)["message"]["content"]
             thread_response_alive = False
             return response_msg
         case "tts_test":
-            return "测试"
+            user_msg = log[-1]["content"]
+            return user_msg
         case _:
             raise KeyError("Unknown Backend Name")
 
 
 def tts(text):
-    from playsound import playsound
-    import re
-    text.replace('(', '（').replace(')', '）')
-    text = re.sub(r"（.*?）", '', text)
+    global current_audio_thread, stop_audio_event
+
+    if not text:
+        return
+    if current_audio_thread and current_audio_thread.is_alive():
+        stop_audio_event.set()  # 发送终止信号
+        current_audio_thread.join()  # 等待线程结束
+        stop_audio_event.clear()  # 重置事件
+    for file in [f for f in os.listdir(log_path) if f.endswith('.mp3')]:
+        try:
+            os.remove(os.path.join(log_path, file))
+        except:
+            pass
+    text = re.sub(r"（.*?）", '', text.replace('(', '（').replace(')', '）'))
+
+    # 生成新的音频文件路径
+    audio_file = f"tts_{random.randint(1000, 9999)}.mp3"
+    audio_path = os.path.join(log_path, audio_file)
+
     match conf_f.conf["tts_engine"].lower():
         case "edge_tts":
             import asyncio
-            global thread_tts_alive
-            thread_tts_alive = True
-            global audio_file
-            audio_file = str(random.random())[2:] + '.mp3'
-            asyncio.run(edge_tts_backend(text))
-            playsound(log_path + audio_file)
-            time.sleep(1)
-            os.remove(log_path + audio_file)
-            thread_tts_alive = False
+            asyncio.run(edge_tts_backend(text, audio_path))
         case "gpt_sovits":
-            import pyaudio
             sovits_api = conf_f.conf["GPT_soVITS_API"]
             url = f"{sovits_api}?text={text}&text_language=zh"
-            p = pyaudio.PyAudio()
-            stream = p.open(format=p.get_format_from_width(2),
-                            channels=1,
-                            rate=32000,
-                            output=True)
-            response = requests.get(url, stream=True)
-            for data in response.iter_content(chunk_size=1024):
-                stream.write(data)
-            stream.stop_stream()
-            stream.close()
-            p.terminate()
+            response = requests.get(url)
+            with open(audio_path, 'wb') as f:
+                f.write(response.content)
+        case _:
+            print(f"不支持的 TTS 引擎: {conf_f.conf['tts_engine']}")
+            return
+
+    def play_audio():
+        try:
+            pygame.mixer.music.load(audio_path)
+            pygame.mixer.music.play()
+            while pygame.mixer.music.get_busy() and not stop_audio_event.is_set():
+                pygame.time.Clock().tick(10)  # 10ms 检查一次
+            pygame.mixer.music.stop()
+            pygame.mixer.music.unload()
+        finally:
+            time.sleep(1)
+            if os.path.exists(audio_path):
+                try:
+                    os.remove(audio_path)
+                except PermissionError:
+                    pass
+
+    current_audio_thread = threading.Thread(target=play_audio)
+    current_audio_thread.start()
 
 
-async def edge_tts_backend(text):
+async def edge_tts_backend(text, audio_path):
     import edge_tts
     rate = '+0%'
     volume = '+0%'
     tts = edge_tts.Communicate(text=text, voice=conf_f.conf["speaker"], rate=rate, volume=volume)
-    await tts.save(log_path + audio_file)
+    await tts.save(audio_path)
 
 
 def live2d_send(response):
@@ -174,7 +210,7 @@ def chat_main(input):
     try:
         from process import post_message
         input = post_message(input)
-    except (ModuleNotFoundError, NameError, TypeError):
+    except (ModuleNotFoundError, NameError, TypeError, ImportError):
         pass
     log.append({"role": "user", "content": input})
     with open(log_path + history_file, 'a+', newline='', encoding='utf-8') as f:
@@ -192,7 +228,7 @@ def chat_main(input):
         else:
             llm_output = raw
             response = raw
-    except (ModuleNotFoundError, NameError, TypeError):
+    except (ModuleNotFoundError, NameError, TypeError, ImportError):
         raw = post_msg()
         llm_output = raw
         response = raw

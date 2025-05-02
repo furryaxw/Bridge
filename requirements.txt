@@ -2,7 +2,7 @@ requests~=2.32.2
 edge-tts
 playsound
 websocket~=0.2.1
-websocket-client~=1.7.0
+websocket-client
 PySimpleGUI
 pyaudio
 enum34
@@ -10,3 +10,4 @@ numpy
 pyreadline3
 realtimestt==0.3.100
 zhconv
+pygame
