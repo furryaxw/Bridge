@@ -66,11 +66,11 @@ stop_audio_event = threading.Event()
 pygame.mixer.init()
 
 
-def post_msg():
+def post_msg(m_inp):
     global thread_response_alive
     match conf_f.conf["Backend"].lower():
         case "openai":
-            msg = {"messages": log}
+            msg = {"messages": m_inp}
             msg.update(conf_f.conf["model_config"])
             if conf_f.conf["model"] is not None:
                 msg.update({"model": conf_f.conf["model"]})
@@ -85,7 +85,7 @@ def post_msg():
             thread_response_alive = False
             return response_sector["message"]["content"]
         case "openai_old":
-            msg = {"messages": log}
+            msg = {"messages": m_inp}
             msg.update(conf_f.conf["model_config"])
             if conf_f.conf["model"] is not None:
                 msg.update({"model": conf_f.conf["model"]})
@@ -101,7 +101,7 @@ def post_msg():
             return response_sector["message"]["content"]
         case "ollama":
             json_data = json.dumps({
-                "messages": log,
+                "messages": m_inp,
                 "model": conf_f.conf["model"],
                 "stream": False
             })
@@ -114,7 +114,7 @@ def post_msg():
             thread_response_alive = False
             return response_msg
         case "tts_test":
-            user_msg = log[-1]["content"]
+            user_msg = m_inp[-1]["content"]
             return user_msg
         case _:
             raise KeyError("Unknown Backend Name")
@@ -221,7 +221,7 @@ def chat_main(input):
     log_f.flush()
     try:
         from process import recv_message
-        raw = recv_message(post_msg())
+        raw = recv_message(post_msg(log))
         if type(raw) is dict:
             llm_output = raw["output"]
             response = str(raw["raw"])
@@ -229,7 +229,7 @@ def chat_main(input):
             llm_output = raw
             response = raw
     except (ModuleNotFoundError, NameError, TypeError, ImportError):
-        raw = post_msg()
+        raw = post_msg(log)
         llm_output = raw
         response = raw
     log.append({"role": "assistant", "content": response})
